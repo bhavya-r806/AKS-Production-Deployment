@@ -1,0 +1,106 @@
+trigger:
+  branches:
+    include:
+      - master
+
+stages:
+
+- stage: Terraform_Deploy
+  displayName: 'Terraform Apply Stage'
+  jobs:
+    - job: Terraform
+      displayName: 'Terraform Init, Plan, Apply'
+      pool:
+        vmImage: ubuntu-latest
+      variables:
+        ARM_CLIENT_ID: $(servicePrincipalId)
+        ARM_CLIENT_SECRET: $(servicePrincipalKey)
+        ARM_SUBSCRIPTION_ID: $(subscriptionId)
+        ARM_TENANT_ID: $(tenantId)
+      steps:
+        - checkout: self
+
+        - task: TerraformInstaller@0
+          inputs:
+            terraformVersion: '1.5.6'
+
+        - task: AzureCLI@2
+          inputs:
+            azureSubscription: 'MyAzureServiceConnection'
+            scriptType: 'bash'
+            scriptLocation: 'inlineScript'
+            inlineScript: |
+              echo "Logged into Azure:"
+              az account show
+
+              echo "Current Directory:"
+              pwd
+              echo "Contents:"
+              ls -la
+
+              echo "Cleaning .terraform folder if exists..."
+              rm -rf .terraform
+
+              echo "Initializing Terraform"
+              terraform init -reconfigure
+
+              echo "Terraform Plan"
+              terraform plan
+
+              echo "Terraform Apply"
+              terraform apply -auto-approve
+            workingDirectory: '$(Build.SourcesDirectory)'
+          env:
+            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+            ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+            ARM_TENANT_ID: $(ARM_TENANT_ID)
+
+        - script: ls -la $(Build.SourcesDirectory)
+          displayName: 'Check root folder contents'
+
+
+- stage: Build
+  displayName: 'Docker Build & Push to ACR'
+  dependsOn: Terraform_Deploy
+  jobs:
+    - job: BuildAndPush
+      displayName: 'Docker Build and Push'
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
+
+        - task: Docker@2
+          inputs:
+            containerRegistry: 'MyAcrConnection'
+            repository: 'myapp'
+            command: 'buildAndPush'
+            Dockerfile: '**/Dockerfile'
+            tags: 'latest'
+
+
+- stage: Deploy
+  displayName: 'Deploy to AKS'
+  dependsOn: Build
+  jobs:
+    - job: DeployToAKS
+      displayName: 'Deploy to Kubernetes'
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+        - checkout: self
+
+        - task: AzureCLI@2
+          inputs:
+            azureSubscription: 'MyAzureServiceConnection'
+            scriptType: 'bash'
+            scriptLocation: 'inlineScript'
+            inlineScript: |
+              echo "Getting AKS Credentials"
+              az aks get-credentials --resource-group your-rg --name prod-aks --overwrite-existing
+
+              echo "Deploying to AKS"
+              kubectl apply -f k8s/deployment.yaml
+              kubectl apply -f k8s/service.yaml
+            workingDirectory: '$(Build.SourcesDirectory)'
