@@ -3,7 +3,7 @@ name: CI-CD Pipeline
 on:
   push:
     branches:
-      - master
+      - main
 
 env:
   ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
