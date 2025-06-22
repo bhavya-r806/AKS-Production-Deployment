@@ -15,13 +15,7 @@ module "vnet" {
   depends_on          = [azurerm_resource_group.rg]
 }
 
-module "acr" {
-  source              = "./modules/acr"
-  acr_name            = var.acr_name
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
 
-}
 
 module "keyvault" {
   source              = "./modules/kv"
