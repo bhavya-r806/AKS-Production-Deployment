@@ -1,106 +1,66 @@
-trigger:
-  branches:
-    include:
-      - master
+name: CI-CD Pipeline
 
-stages:
+on:
+  push:
+    branches:
+      - main
 
-- stage: Terraform_Deploy
-  displayName: 'Terraform Apply Stage'
-  jobs:
-    - job: Terraform
-      displayName: 'Terraform Init, Plan, Apply'
-      pool:
-        vmImage: ubuntu-latest
-      variables:
-        ARM_CLIENT_ID: $(servicePrincipalId)
-        ARM_CLIENT_SECRET: $(servicePrincipalKey)
-        ARM_SUBSCRIPTION_ID: $(subscriptionId)
-        ARM_TENANT_ID: $(tenantId)
-      steps:
-        - checkout: self
+env:
+  ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  
+jobs:
 
-        - task: TerraformInstaller@0
-          inputs:
-            terraformVersion: '1.5.6'
+  terraform_deploy:
+    name: Terraform Init, Plan, Apply
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - task: AzureCLI@2
-          inputs:
-            azureSubscription: 'MyAzureServiceConnection'
-            scriptType: 'bash'
-            scriptLocation: 'inlineScript'
-            inlineScript: |
-              echo "Logged into Azure:"
-              az account show
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.6
 
-              echo "Current Directory:"
-              pwd
-              echo "Contents:"
-              ls -la
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
-              echo "Cleaning .terraform folder if exists..."
-              rm -rf .terraform
+      - name: Terraform Init
+        run: terraform init -reconfigure
 
-              echo "Initializing Terraform"
-              terraform init -reconfigure
+      - name: Terraform Plan
+        run: terraform plan
 
-              echo "Terraform Plan"
-              terraform plan
+      - name: Terraform Apply
+        run: terraform apply -auto-approve
 
-              echo "Terraform Apply"
-              terraform apply -auto-approve
-            workingDirectory: '$(Build.SourcesDirectory)'
-          env:
-            ARM_CLIENT_ID: $(ARM_CLIENT_ID)
-            ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
-            ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
-            ARM_TENANT_ID: $(ARM_TENANT_ID)
+  deploy_to_aks:
+    name: Deploy to AKS
+    needs: terraform_deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
 
-        - script: ls -la $(Build.SourcesDirectory)
-          displayName: 'Check root folder contents'
+      - name: Login to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Get AKS credentials
+        run: |
+          az aks get-credentials --resource-group your-rg --name prod-aks --overwrite-existing
 
-- stage: Build
-  displayName: 'Docker Build & Push to ACR'
-  dependsOn: Terraform_Deploy
-  jobs:
-    - job: BuildAndPush
-      displayName: 'Docker Build and Push'
-      pool:
-        vmImage: ubuntu-latest
-      steps:
-        - checkout: self
-
-        - task: Docker@2
-          inputs:
-            containerRegistry: 'MyAcrConnection'
-            repository: 'myapp'
-            command: 'buildAndPush'
-            Dockerfile: '**/Dockerfile'
-            tags: 'latest'
-
-
-- stage: Deploy
-  displayName: 'Deploy to AKS'
-  dependsOn: Build
-  jobs:
-    - job: DeployToAKS
-      displayName: 'Deploy to Kubernetes'
-      pool:
-        vmImage: ubuntu-latest
-      steps:
-        - checkout: self
-
-        - task: AzureCLI@2
-          inputs:
-            azureSubscription: 'MyAzureServiceConnection'
-            scriptType: 'bash'
-            scriptLocation: 'inlineScript'
-            inlineScript: |
-              echo "Getting AKS Credentials"
-              az aks get-credentials --resource-group your-rg --name prod-aks --overwrite-existing
-
-              echo "Deploying to AKS"
-              kubectl apply -f k8s/deployment.yaml
-              kubectl apply -f k8s/service.yaml
-            workingDirectory: '$(Build.SourcesDirectory)'
+      - name: Deploy to AKS
+        run: |
+          kubectl apply -f k8s/deployment.yaml
+          kubectl apply -f k8s/service.yaml
