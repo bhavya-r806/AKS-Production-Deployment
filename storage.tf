@@ -8,10 +8,14 @@ resource "azurerm_storage_account" "storage_account" {
   tags = {
     environment = "staging"
   }
+  depends_on = [
+    azurerm_resource_group.rg
+  ]
 }
+
 
 resource "azurerm_storage_container" "storage_container" {
   name                  = "maale-123"
-  storage_account_name  = azurerm_storage_account.storage_account.name
+  storage_account_id    = azurerm_storage_account.storage_account.id
   container_access_type = "private"
 }
