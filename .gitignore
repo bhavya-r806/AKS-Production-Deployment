@@ -12,7 +12,8 @@ crash.log
 # Ignore variable override files (optional)
 *.tfvars
 
-
+*.backup
 
 # Ignore VS Code workspace settings (optional)
 .vscode/
+
